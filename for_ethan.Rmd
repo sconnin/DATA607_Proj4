@@ -1,0 +1,182 @@
+---
+title: "project 4"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Load Libraries
+
+```{r echo=FALSE messages=FALSE}
+library(tidyverse)
+library(tidytext)
+library(tm)
+library(readr)
+library(textfeatures)
+library(magrittr)
+library(stringr)
+library(R.utils) #bunzip2
+library(glue)
+
+
+
+
+```
+## ignore this chunk 
+```{r}
+
+```
+## You'll recognize some code here
+```{r}
+
+#these are the directories and folders/files(unzipped) I am working with locally
+
+spam_dir<-"C:/Users/seanc/Documents/Data_Science/CUNY/Data 607 Acquisition and Management/Assignments/Proj 4/spam_2"
+
+ham_dir<-"C:/Users/seanc/Documents/Data_Science/CUNY/Data 607 Acquisition and Management/Assignments/Proj 4/easy_ham_2"
+
+#create directory to each file in folders
+
+spam_files <- spam_dir%>% 
+    paste(., list.files(.), sep = "/")
+
+ham_files <- ham_dir%>% 
+    paste(., list.files(.), sep = "/")
+
+##Now I use your code to do some initial cleaning. Note I changed some labels for my own labels.
+
+#create list containers
+
+filepaths <- c()
+headers <- c()
+bodies <- c()
+spams <- c()
+
+#create function to separate header and body
+
+header_and_body <- function(filestring) {
+  linelist <- read_lines(filestring)
+  len <- length(linelist)
+  for (line in 1:len) {
+    if (linelist[line] == '') {
+      header <- glue_collapse(linelist[1:(line-1)], sep='\n')
+      body <- glue_collapse(linelist[line:len], sep='\n')
+      return(c(filestring, header, body, str_starts(filestring, 's')))
+    }
+  }
+}
+
+# spam_files variable below is a list of all files in spam folder
+
+for (fp in spam_files) {
+  parsed <- header_and_body(fp)
+  filepaths <- c(filepaths, parsed[1])
+  headers <- c(headers, parsed[2])
+  bodies <- c(bodies, parsed[3])
+}
+
+#combine into spam dataframe
+
+df_spam <- data.frame('filepaths'=filepaths, 'headers'=headers,'bodies'=bodies)
+
+# spam_list variable below is a list of all files in spam folder
+
+for (fp in ham_files) {
+  parsed <- header_and_body(fp)
+  filepaths <- c(filepaths, parsed[1])
+  headers <- c(headers, parsed[2])
+  bodies <- c(bodies, parsed[3])
+}
+
+df_ham <-data.frame('filepaths'=filepaths, 'headers'= headers,'bodies'=bodies)
+
+#Now I create a small subset of each df for code development purposes
+
+dfs_sm <- df_spam%>%slice_head(n=5)
+dfh_sm <- df_ham%>%slice_head(n=5)
+
+#check dimensions  --> 5,3  
+
+dim(dfh_sm)
+View(dfh_sm)
+```
+
+### make corpus from email bodies
+
+```{r}
+
+spam_corpus<-VCorpus(VectorSource(dfs_sm$bodies))
+ham_corpus<-VCorpus(VectorSource(dfh_sm$bodies))
+```
+
+### clean up each corpus - round two based on my visual review of dfh_sm/dfs_sm$bodies content
+```{r}
+#spam corpus
+
+spam_corpus <- tm_map(spam_corpus, content_transformer(function(spam_corpus)
+  gsub(spam_corpus, pattern='Comment:.+|Version:.+|Content-.+|-{2}.+',        replacement = "")))
+
+spam_corpus <- tm_map(spam_corpus, content_transformer(function(spam_corpus)
+  gsub(spam_corpus, pattern = '\\w{15,40}', replacement = " ")))
+  
+spam_corpus <- tm_map(spam_corpus, removePunctuation)
+spam_corpus <- tm_map(spam_corpus,content_transformer(tolower))
+spam_corpus <- tm_map(spam_corpus, removeNumbers)
+spam_corpus <- tm_map(spam_corpus, stripWhitespace)
+spam_corpus <- tm_map(spam_corpus, removeWords, stopwords("english"))
+spam_corpus <- tm_map(spam_corpus, stemDocument)
+
+#ham corpus
+
+ham_corpus <- tm_map(ham_corpus, content_transformer(function(ham_corpus) gsub(ham_corpus, pattern='Comment:.+|Version:.+|Content-.+|-{2}.+', replacement = "")))
+
+ham_corpus <- tm_map(ham_corpus, content_transformer(function(ham_corpus) gsub(ham_corpus, pattern = '\\w{15,40}', replacement = " ")))
+
+ham_corpus <- tm_map(ham_corpus, removePunctuation)
+ham_corpus <- tm_map(ham_corpus,content_transformer(tolower))
+ham_corpus <- tm_map(ham_corpus, removeNumbers) 
+ham_corpus <- tm_map(ham_corpus, stripWhitespace)
+ham_corpus <- tm_map(ham_corpus, removeWords, stopwords("english"))
+ham_corpus <- tm_map(ham_corpus, stemDocument)
+
+#this is what the corpus looks like as a df (some code I swiped online)
+
+ham_df<-data.frame(text=unlist(sapply(ham_corpus, `[`, "content")), 
+    stringsAsFactors=F)
+
+ham_df<-ham_df[1,] # note there were 4 other empty rows, not sure why
+
+View(ham_df)
+
+#We can create document matrices, remove sparse terms (optional)
+
+spam_dm <- DocumentTermMatrix(spam_corpus)#%>%removeSparseTerms(.7)
+ham_dm <- DocumentTermMatrix(ham_corpus)#%>%removeSparseTerms(.7)
+
+#create dfs from the dtms
+
+spam_dm%>%tidy()%>%mutate(category = "spam", .after = document)
+ham_dm%>%tidy()%>%mutate(category = "ham", .after = document)
+
+
+# I can quite figure out where to go from here!!!
+
+
+```
+
+### develop a very basic classification model
+```{r}
+
+
+
+
+
+
+
+
+
+
+```
+
+
