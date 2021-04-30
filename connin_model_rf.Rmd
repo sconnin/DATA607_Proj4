@@ -169,8 +169,6 @@ rf_model_fit <- fit_resamples(
 
 collect_metrics(rf_model_fit)  #roc_auc = .99, accuracy = .95
 
-rf_roc<-roc_auc(rf_model_fit, truth = is_spam, .pred_yes)
-
 #Evaluate null model results as a check on ourselves
 
 null_classification <- null_model() %>%
