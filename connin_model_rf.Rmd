@@ -1,0 +1,206 @@
+---
+title: "draft model development - random forest"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+
+library(tidymodels)
+library(magrittr)
+library(tidyverse)
+library(glue)
+library(textrecipes)
+library(discrim)
+library(tidytext)
+#library(hardhat) # for sparse matrix
+library(randomForest)
+library(ranger)
+library(themis)
+
+
+```
+
+##  Download email data stored on Github
+
+```{r}
+download<-read_csv("https://raw.githubusercontent.com/ebhtra/msds-607/main/Project4/headersBodies.csv")
+temp<-download
+temp%<>%as.data.frame()
+dim(temp)
+head(temp, 2)
+```
+
+## evaluate the dataset
+
+```{r}
+
+#subset dataframe and factor our outcome variable, "is_spam"
+
+smallerframe <- temp[sample(6046, 2000),] # take a smaller sample to work with 
+
+email<-smallerframe%>%rename(id="X1")%>%select(id, is_spam, bodies)
+
+head(email, 5)
+
+#need to turn categorical outcome variable to factor for the modeling process
+
+email$is_spam%<>%factor
+
+#check that outcome ("TRUE") is first level factor - for model requirements, update as necessary using relevel()
+
+email$is_spam<-relevel(email$is_spam, "TRUE")
+
+levels(email[["is_spam"]]) # check levels
+
+nlevels(email[["is_spam"]]) # check number of levels
+
+# review data in tidy form
+
+tidy<-email%>%
+    unnest_tokens(word, bodies)%>%
+    group_by(word)%>%
+    filter(n()>20)%>%
+        ungroup()
+
+tidy %>%
+  count(is_spam, word, sort = TRUE) %>%
+  anti_join(get_stopwords()) %>%
+  group_by(is_spam) %>%
+  top_n(20) %>%
+  ungroup() %>%
+  ggplot(aes(reorder_within(word, n, is_spam), n,
+    fill = is_spam
+  )) +
+  geom_col(alpha = 0.8, show.legend = FALSE) +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(~is_spam, scales = "free") +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(
+    x = NULL, y = "Word count",
+    title = "Most frequent words")
+
+```
+
+## build model
+
+
+```{r}
+
+
+#create training and test data. Create a sparse matrix blueprint to speed modeling time. 
+
+
+#sparse_bp <- default_recipe_blueprint(composition = "dgCMatrix") # note sparse model not supported by randomforest model/engine combo. Left it out for this round. 
+
+set.seed(122) # for reproducibility
+
+email_split<- initial_split(email, prop = 0.75, strata = is_spam)
+
+email_train <- training(email_split)
+email_test <- testing(email_split)
+
+head(email_train, 1)
+
+glue("The number of rows in the training set is {nrow(email_train)}.") 
+
+glue("The number of rows in the test set is {nrow(email_test)}.") 
+
+#Build a recipe for the model that includes our word tokens. Be sure the outcome variable is a factor.
+
+email_recipe<-recipe(is_spam ~ bodies, data = email_train)%>%# note variable formula
+    themis::step_downsample(is_spam, under_ratio = 1) #downsampling to address variable imbalance
+
+email_recipe<-email_recipe%>%
+    step_tokenize(bodies)%>%
+    step_tokenfilter(bodies, max_tokens = 1e3)%>%
+    step_tfidf(bodies)
+
+#Create model instances for input into workflow: 1) random forest, 2) Logistic, 3) XGBoost, 4) Naive Bayes, 5) K-Nearest Neighbor
+
+rf<- rand_forest(trees = 100)%>%
+    set_engine("ranger")%>%
+    set_mode("classification") 
+  
+#should be able to run sparse with ranger engine nomenclature, "importance=impurity" gives insight into predictors that drive performance
+
+logist<- logistic_reg()%>%
+    set_mode("classification")%>%
+    set_engine("glm") #should be able to run sparse with glmnet engine
+
+xgb <- boost_tree() %>%  #note need to install and run xgboost for this model, should be able to run sparse
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+nb <- naive_Bayes() %>%
+  set_mode("classification") %>%
+  set_engine("naivebayes")
+
+
+#set up cross validation for model instances with 5 folds
+
+email_folds <- vfold_cv(data = email_train, strata = is_spam, v = 5)
+
+
+```
+
+```{r}
+
+# Build our workflow and add random forest model
+
+email_workflow<- workflow()%>%         
+    add_recipe(email_recipe)%>%
+    add_model(rf)
+
+#Test model fit (Random Forest) with cross validation. #this code comes from https://rpubs.com/shampjeff/tidy_spam_clf
+#note: was unable to coerce sparse matrix into df with random forest model. Not clear why. 
+
+rf_model_fit <- fit_resamples(
+    email_workflow,
+    email_folds,
+    metrics = metric_set(roc_auc, accuracy),
+    control = control_resamples(save_pred=TRUE))
+
+collect_metrics(rf_model_fit)  #roc_auc = .99, accuracy = .95
+
+rf_roc<-roc_auc(rf_model_fit, truth = is_spam, .pred_yes)
+
+#Evaluate null model results as a check on ourselves
+
+null_classification <- null_model() %>%
+  set_engine("parsnip") %>%
+  set_mode("classification")
+
+null_wf <- workflow() %>%
+  add_recipe(email_recipe) %>%
+  add_model(null_classification)
+
+null_model_fit <- fit_resamples(
+    null_wf,
+    email_folds,
+    metrics = metric_set(roc_auc, accuracy),
+    control = control_resamples(save_pred=TRUE))
+
+collect_metrics(null_model_fit)  #--> roc_auc .50, accuracy = .68
+
+# Use last_fit to evaluate full training set and then the test set
+
+rf_final<-
+    email_workflow%>%
+    last_fit(email_split)%>%
+    collect_predictions()%>%
+    conf_mat(truth = is_spam, estimate = .pred_class)%>%
+    summary()
+
+rf_final
+
+```
+
+
+
