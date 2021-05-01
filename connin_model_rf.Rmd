@@ -88,8 +88,7 @@ tidy %>%
 
 ```
 
-## build model
-
+## build our model structure and workflow
 
 ```{r}
 
@@ -168,9 +167,56 @@ rf_model_fit <- fit_resamples(
     control = control_resamples(save_pred=TRUE))
 
 collect_metrics(rf_model_fit)  #roc_auc = .99, accuracy = .95
+```
+#look at whats under the rf_model_fit hood. 
+
+A very nested set of lists, tibbles, dataframes
+
+
+```{r}
+
+(splits<-rf_model_fit[1]) # splits - a list of 5 each with a list of 4 dataframes with 3 cols (id, is_spam, bodies)
+(id<-rf_model_fit[2]) # id fold 1-5 (char)
+(mtrc<-rf_model_fit[3]) # .metrics list of 5 tibbles each with a dataframe of 4 cols (.metric, .estimator, .estimate, .config)
+(notes<-rf_model_fit[4]) # .notes list of 5 tibbles each with one col dataframe
+(preds<-rf_model_fit[5]) # .predictions - list of 5 tibbles with 6 col categories each
+
+# look at splits data
+
+sp<-rf_model_fit[1] #-- the splits 
+
+sp[[1]][[1]][1]  #-- dataframe level
+
+# look at ids
+
+(v1<-data.frame(unlist(spl[[1]])))
+(v2<-data.frame(unlist(spl[1])))#  this outputs the data id value 
+
+(ids<-((rf_model_fit[2])))
+
+#look at metrics
+
+mtr <-(rf_model_fit[3]) #- metrics
+mtr %<>% unnest(.metrics)
+data.frame(head(mtr, 10))
+
+#look at notes
+
+notes<-(rf_model_fit[4])#%>%unnest(.notes)
+notes%<>%unnest(.notes) # seem to be empty
+
+#look at predictions
+
+predictions <-(rf_model_fit[5]) #- list of tibbles called .predictions
+predictions %<>% unnest(.predictions)
+data.frame(head(predictions, 5))
+
+```
+
 
 #Evaluate null model results as a check on ourselves
 
+```{r}
 null_classification <- null_model() %>%
   set_engine("parsnip") %>%
   set_mode("classification")
@@ -186,19 +232,24 @@ null_model_fit <- fit_resamples(
     control = control_resamples(save_pred=TRUE))
 
 collect_metrics(null_model_fit)  #--> roc_auc .50, accuracy = .68
+```
 
 # Use last_fit to evaluate full training set and then the test set
+
+```{r}
 
 rf_final<-
     email_workflow%>%
     last_fit(email_split)%>%
     collect_predictions()%>%
-    conf_mat(truth = is_spam, estimate = .pred_class)%>%
-    summary()
+    conf_mat(truth = is_spam, estimate = .pred_class)
 
 rf_final
+str(rf_final[1])
+
 
 ```
+
 
 
 
